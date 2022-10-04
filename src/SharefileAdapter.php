@@ -5,7 +5,7 @@ namespace Kapersoft\FlysystemSharefile;
 use Exception;
 use League\Flysystem\Util;
 use League\Flysystem\Config;
-use Kapersoft\Sharefile\Client;
+use Kapersoft\ShareFile\Client;
 use League\Flysystem\Adapter\AbstractAdapter;
 use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
 
@@ -37,7 +37,7 @@ class SharefileAdapter extends AbstractAdapter
     /**
      * ShareFile Client.
      *
-     * @var  \Kapersoft\Sharefile\Client;
+     * @var  \Kapersoft\ShareFile\Client;
      * */
     protected $client;
 
@@ -51,7 +51,7 @@ class SharefileAdapter extends AbstractAdapter
     /**
      * SharefileAdapter constructor.
      *
-     * @param Client $client              Instance of Kapersoft\Sharefile\Client
+     * @param Client $client              Instance of Kapersoft\ShareFile\Client
      * @param string $prefix              Folder prefix
      * @param bool   $returnShareFileItem Indicated if getMetadata/listContents should return ShareFile item array.
      *

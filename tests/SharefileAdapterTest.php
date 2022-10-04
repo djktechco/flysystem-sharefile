@@ -9,7 +9,7 @@ use League\Flysystem\Util;
 use League\Flysystem\Config;
 use GuzzleHttp\Psr7\Response;
 use org\bovigo\vfs\vfsStream;
-use Kapersoft\Sharefile\Client;
+use Kapersoft\ShareFile\Client;
 use PHPUnit\Framework\TestCase;
 use Kapersoft\Sharefile\Exceptions\BadRequest;
 use Kapersoft\FlysystemSharefile\SharefileAdapter;
@@ -27,7 +27,7 @@ class SharefileAdapterTest extends TestCase
     /**
      * ShareFile client.
      *
-     * @var \Kapersoft\Sharefile\Client|\Prophecy\Prophecy\ObjectProphecy
+     * @var \Kapersoft\ShareFile\Client|\Prophecy\Prophecy\ObjectProphecy
      */
     protected $client;
 

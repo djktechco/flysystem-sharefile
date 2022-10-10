@@ -6,6 +6,8 @@ use Exception;
 use League\Flysystem\Util;
 use League\Flysystem\Config;
 use Kapersoft\ShareFile\Client;
+use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\Adapter\AbstractAdapter;
 use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
 
@@ -17,7 +19,7 @@ use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
  *
  * @link     http://github.com/kapersoft/flysystem-sharefile
  */
-class SharefileAdapter extends AbstractAdapter
+class SharefileAdapter implements FilesystemAdapter
 {
 //    use StreamedTrait;
     use NotSupportingVisibilityTrait;
@@ -77,7 +79,7 @@ class SharefileAdapter extends AbstractAdapter
     /**
      * {@inheritdoc}
      */
-    public function read($path)
+    public function read(string $path): string
     {
         if (! $item = $this->getItemByPath($path)) {
             return false;
@@ -115,7 +117,7 @@ class SharefileAdapter extends AbstractAdapter
     /**
      * {@inheritdoc}
      */
-    public function listContents($directory = '', $recursive = false)
+    public function listContents(string $directory = '', $recursive = false): iterable
     {
         if (! $item = $this->getItemByPath($directory)) {
             return false;
@@ -176,9 +178,9 @@ class SharefileAdapter extends AbstractAdapter
     /**
      * {@inheritdoc}
      */
-    public function writeStream($path, $resource, Config $config = null)
+    public function writeStream(string $path, $resource, Config $config = null): void
     {
-        return $this->uploadFile($path, $resource, true);
+        $this->uploadFile($path, $resource, true);
     }
 
     /**
@@ -230,37 +232,39 @@ class SharefileAdapter extends AbstractAdapter
     /**
      * {@inheritdoc}
      */
-    public function copy($path, $newpath)
+    public function copy(string $source, string $destination, Config $config): void
     {
-        if (! $targetFolderItem = $this->getItemByPath(Util::dirname($newpath))) {
-            return false;
+        // TODO:: change return types to UnableToCopyFile::fromLocationTo() exception.
+
+        if (! $targetFolderItem = $this->getItemByPath(Util::dirname($destination))) {
+            //return false;
         }
 
         if (! $this->checkAccessControl($targetFolderItem, self::CAN_UPLOAD)) {
-            return false;
+            //return false;
         }
 
-        if (! $item = $this->getItemByPath($path)) {
-            return false;
+        if (! $item = $this->getItemByPath($source)) {
+            //return false;
         }
 
-        if (strcasecmp(Util::dirname($path), Util::dirname($newpath)) != 0 &&
-            strcasecmp(basename($path), basename($newpath)) == 0) {
+        if (strcasecmp(Util::dirname($source), Util::dirname($destination)) != 0 &&
+            strcasecmp(basename($source), basename($destination)) == 0) {
             $this->client->copyItem($targetFolderItem['Id'], $item['Id'], true);
         } else {
             $contents = $this->client->getItemContents($item['Id']);
-            $this->uploadFile($newpath, $contents, true);
+            $this->uploadFile($destination, $contents, true);
         }
 
-        return is_array($this->has($newpath));
+        is_array($this->has($destination));
     }
 
     /**
      * {@inheritdoc}
      */
-    public function delete($path)
+    public function delete($path): void
     {
-        return $this->deleteDir($path);
+        $this->deleteDir($path);
     }
 
     /**

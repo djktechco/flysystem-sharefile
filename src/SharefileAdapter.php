@@ -3,13 +3,18 @@
 namespace Kapersoft\FlysystemSharefile;
 
 use Exception;
-use League\Flysystem\Util;
+use Throwable;
 use League\Flysystem\Config;
 use Kapersoft\ShareFile\Client;
+use League\Flysystem\FileAttributes;
+use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\UnableToReadFile;
 use League\Flysystem\FilesystemAdapter;
-use League\Flysystem\Adapter\AbstractAdapter;
-use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
+use League\Flysystem\UnableToWriteFile;
+use League\Flysystem\FilesystemException;
+use League\Flysystem\UnableToDeleteDirectory;
+use League\Flysystem\UnableToRetrieveMetadata;
 
 /**
  * Flysysten ShareFile Adapter.
@@ -21,8 +26,6 @@ use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
  */
 class SharefileAdapter implements FilesystemAdapter
 {
-//    use StreamedTrait;
-    use NotSupportingVisibilityTrait;
 
     /** ShareFile access control constants */
     const CAN_ADD_FOLDER = 'CanAddFolder';
@@ -51,6 +54,13 @@ class SharefileAdapter implements FilesystemAdapter
     protected $returnShareFileItem;
 
     /**
+     * Path prefix for files.
+     *
+     * @var string
+     */
+    protected $pathPrefix;
+
+    /**
      * SharefileAdapter constructor.
      *
      * @param Client $client              Instance of Kapersoft\ShareFile\Client
@@ -69,11 +79,14 @@ class SharefileAdapter implements FilesystemAdapter
     }
 
     /**
-     * {@inheritdoc}
+     * Sets path prefix for files. Acts as root directory for all files and folders.
+     *
+     * @param $prefix
+     * @return void
      */
-    public function has($path)
+    public function setPathPrefix($prefix)
     {
-        return $this->getMetadata($path);
+        $this->pathPrefix = trim($prefix, '/');
     }
 
     /**
@@ -81,17 +94,21 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function read(string $path): string
     {
-        if (! $item = $this->getItemByPath($path)) {
-            return false;
+        try {
+            if (! $item = $this->getItemByPath($path)) {
+                throw new Exception('Item could not be found.');
+            }
+
+            if (! $this->checkAccessControl($item, self::CAN_DOWNLOAD)) {
+                throw new Exception('Access forbidden.');
+            }
+
+            $contents = $this->client->getItemContents($item['Id']);
+
+            return $this->mapItemInfo($item, Util::dirname($path), $contents)['contents'] ?? '';
+        } catch (Throwable $exception) {
+            throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
         }
-
-        if (! $this->checkAccessControl($item, self::CAN_DOWNLOAD)) {
-            return false;
-        }
-
-        $contents = $this->client->getItemContents($item['Id']);
-
-        return $this->mapItemInfo($item, Util::dirname($path), $contents);
     }
 
     /**
@@ -120,11 +137,12 @@ class SharefileAdapter implements FilesystemAdapter
     public function listContents(string $directory = '', $recursive = false): iterable
     {
         if (! $item = $this->getItemByPath($directory)) {
-            return false;
+            return [];
         }
 
         return $this->buildItemList($item, $directory, $recursive);
     }
+
 
     /**
      * {@inheritdoc}
@@ -170,9 +188,13 @@ class SharefileAdapter implements FilesystemAdapter
     /**
      * {@inheritdoc}
      */
-    public function write($path, $contents, Config $config = null)
+    public function write($path, $contents, Config $config = null): void
     {
-        return $this->uploadFile($path, $contents, true);
+        try {
+            $this->uploadFile($path, $contents, true);
+        } catch (Throwable $exception) {
+            throw new UnableToWriteFile($path, $exception->getCode(), $exception);
+        }
     }
 
     /**
@@ -232,31 +254,112 @@ class SharefileAdapter implements FilesystemAdapter
     /**
      * {@inheritdoc}
      */
-    public function copy(string $source, string $destination, Config $config): void
+    public function copy(string $source, string $destination, $config = []): void
     {
-        // TODO:: change return types to UnableToCopyFile::fromLocationTo() exception.
+        try {
+            if (! $targetFolderItem = $this->getItemByPath(Util::dirname($destination))) {
+                throw new Exception("The file could not be copied because the destination, $destination, does not exist.");
+            }
 
-        if (! $targetFolderItem = $this->getItemByPath(Util::dirname($destination))) {
-            //return false;
+            if (! $this->checkAccessControl($targetFolderItem, self::CAN_UPLOAD)) {
+                throw new Exception("The file could not be copied because the user does not have access to the target folder, $destination.");
+            }
+
+            if (! $item = $this->getItemByPath($source)) {
+                throw new Exception("The file could not be copied because the source file, at $source, does not exist.");
+            }
+
+            if (strcasecmp(Util::dirname($source), Util::dirname($destination)) != 0 &&
+                strcasecmp(basename($source), basename($destination)) == 0) {
+                $this->client->copyItem($targetFolderItem['Id'], $item['Id'], true);
+            } else {
+                $contents = $this->client->getItemContents($item['Id']);
+                $this->uploadFile($destination, $contents, true);
+            }
+        } catch (Throwable $exception) {
+            throw UnableToCopyFile::fromLocationTo($source, $destination, $exception);
         }
+    }
 
-        if (! $this->checkAccessControl($targetFolderItem, self::CAN_UPLOAD)) {
-            //return false;
+    /**
+     * {@inheritdoc}
+     */
+    public function move(string $source, string $destination, Config $config): void
+    {
+        try {
+            $this->copy($source, $destination, $config);
+            $this->deleteItem($source);
+        } catch (Throwable $exception) {
+            throw UnableToMoveFile::fromLocationTo($source, $destination, $exception);
         }
+    }
 
-        if (! $item = $this->getItemByPath($source)) {
-            //return false;
+    /**
+     * {@inheritdoc}
+     */
+    public function directoryExists(string $path): bool
+    {
+        return is_array($this->has($path));
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function createDirectory(string $path, Config $config): void
+    {
+        try {
+            if (! $this->createDir($path)) {
+                throw new Exception('The directory could not be created.');
+            }
+        } catch (Throwable $exception) {
+            throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
         }
+    }
 
-        if (strcasecmp(Util::dirname($source), Util::dirname($destination)) != 0 &&
-            strcasecmp(basename($source), basename($destination)) == 0) {
-            $this->client->copyItem($targetFolderItem['Id'], $item['Id'], true);
-        } else {
-            $contents = $this->client->getItemContents($item['Id']);
-            $this->uploadFile($destination, $contents, true);
+    /**
+     * {@inheritdoc}
+     */
+    public function visibility(string $path): FileAttributes
+    {
+        // not supported so just skip go ahead and throw the exception.
+        try {
+            throw new Exception(get_class($this) . ' does not support visibility. Path: ' . $path);
+
+            return new FileAttributes($path);
+        } catch (Throwable $exception) {
+            throw UnableToRetrieveMetadata::visibility($path, '', $exception);
         }
+    }
 
-        is_array($this->has($destination));
+    public function mimeType(string $path): FileAttributes
+    {
+        // TODO: Implement mimeType() method.
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function fileExists(string $path): bool
+    {
+        return is_array($this->has($path));
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function setVisibility(string $path, string $visibility): void
+    {
+        throw UnableToRetrieveMetadata::visibility(get_class($this) . ' does not support visibility. Path: ' . $path);
+    }
+
+    public function fileSize(string $path): FileAttributes
+    {
+        // TODO: Implement fileSize() method.
+    }
+
+    public function lastModified(string $path): FileAttributes
+    {
+        // TODO: Implement lastModified() method.
     }
 
     /**
@@ -264,31 +367,21 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function delete($path): void
     {
-        $this->deleteDir($path);
+        $this->deleteItem($path);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function deleteDir($dirname)
+    public function deleteDirectory($path): void
     {
-        if (! $item = $this->getItemByPath($dirname)) {
-            return false;
-        }
-
-        if (! $this->checkAccessControl($item, self::CAN_DELETE_CURRENT_ITEM)) {
-            return false;
-        }
-
-        $this->client->deleteItem($item['Id']);
-
-        return $this->has($dirname) === false;
+        $this->deleteItem($path);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function createDir($dirname, Config $config = null)
+    public function createDir($dirname)
     {
         $parentFolder = Util::dirname($dirname);
         $folder = basename($dirname);
@@ -459,7 +552,7 @@ class SharefileAdapter implements FilesystemAdapter
      *
      * @return array
      */
-    protected function buildItemList(array $item, string $path, bool $recursive = false):array
+    protected function buildItemList(array $item, string $path, $recursive = false):array
     {
         if ($this->isShareFileApiModelsFile($item)) {
             return [];
@@ -580,5 +673,52 @@ class SharefileAdapter implements FilesystemAdapter
         } else {
             return false;
         }
+    }
+
+    /**
+     * Files and directories are deleted in the same manner, by providing a path, so this method handles both.
+     *
+     * @param string $path
+     * @return void
+     */
+    protected function deleteItem(string $path)
+    {
+        try {
+            if (! $item = $this->getItemByPath($path)) {
+                throw new Exception('The directory does not exist.');
+            }
+
+            if (! $this->checkAccessControl($item, self::CAN_DELETE_CURRENT_ITEM)) {
+                throw new Exception('You do not have permission to delete the directory.');
+            }
+
+            $this->client->deleteItem($item['Id']);
+
+            if ($this->has($path) !== false) {
+                throw new Exception('The directory could not be deleted.');
+            }
+
+        } catch (Throwable $exception) {
+            throw UnableToDeleteDirectory::atLocation($path, '', $exception);
+        }
+    }
+
+    /**
+     * Combines path prefix to $path.
+     *
+     * @param $path
+     * @return string
+     */
+    protected function applyPathPrefix($path): string
+    {
+        return $this->pathPrefix . '/' . trim($path, '/');
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function has($path)
+    {
+        return $this->getMetadata($path);
     }
 }

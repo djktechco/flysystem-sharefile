@@ -2,9 +2,11 @@
 
 namespace Kapersoft\FlysystemSharefile\Tests;
 
-use League\Flysystem\Util;
 use League\Flysystem\Config;
 use Kapersoft\ShareFile\Client;
+use Kapersoft\FlysystemSharefile\Util;
+use League\Flysystem\UnableToReadFile;
+use DMS\PHPUnitExtensions\ArraySubset\ArraySubsetAsserts;
 
 /**
  * Online Flysystem ShareFile Adapter tests.
@@ -16,6 +18,8 @@ use Kapersoft\ShareFile\Client;
  */
 class SharefileAdapterFunctionalTest extends TestCase
 {
+    use ArraySubsetAsserts;
+
     /**
      * Test for itCanGetAClient.
      *
@@ -74,7 +78,7 @@ class SharefileAdapterFunctionalTest extends TestCase
         $contents = $this->faker()->text;
         $this->createResourceFile($name, $contents);
 
-        $response = $this->adapter->read($name);
+        $response = $this->adapter->readWithMeta($name);
 
         $this->assertArraySubset([
             'type' => 'file',
@@ -92,19 +96,19 @@ class SharefileAdapterFunctionalTest extends TestCase
      *
      * @dataProvider filesProvider
      */
-    public function itCanReadstream(string $name)
+    public function itCanReadStream(string $name)
     {
         $contents = $this->faker()->text;
         $this->createResourceFile($name, $contents);
 
-        $response = $this->adapter->readstream($name);
+        $response = $this->adapter->readStreamWithMeta($name);
 
         $this->assertArraySubset([
             'type' => 'file',
             'path' => $name,
         ], $response);
 
-        $this->assertInternalType('resource', $response['stream']);
+        $this->assertIsResource($response['stream']);
     }
 
     /**
@@ -119,20 +123,20 @@ class SharefileAdapterFunctionalTest extends TestCase
     public function itCanListContents(string $path)
     {
         // No file
-        $this->createResourceDir(UTIL::dirname($path));
-        $this->assertCount(0, $this->adapter->listContents(UTIL::dirname($path)));
+        $this->createResourceDir(Util::dirname($path));
+        $this->assertCount(0, $this->adapter->listContents(Util::dirname($path)));
 
         // Single file
         $contents = $this->faker()->text;
         $this->createResourceFile($path, $contents);
 
-        $this->assertCount(1, $this->adapter->listContents(UTIL::dirname($path)));
+        $this->assertCount(1, $this->adapter->listContents(Util::dirname($path)));
 
         // Multiple files
         $this->createResourceFile(str_replace('/', '/first copy of ', $path), $contents);
         $this->createResourceFile(str_replace('/', '/second copy of ', $path), $contents);
 
-        $this->assertCount(3, $this->adapter->listContents(UTIL::dirname($path)));
+        $this->assertCount(3, $this->adapter->listContents(Util::dirname($path)));
     }
 
     /**
@@ -203,14 +207,7 @@ class SharefileAdapterFunctionalTest extends TestCase
     {
         $contents = $this->faker()->text;
 
-        $result = $this->adapter->write($filename, $contents, new Config);
-
-        $this->assertArraySubset([
-            'type' => 'file',
-            'path' => $filename,
-            'contents' => $contents,
-            'mimetype' => Util::guessMimeType($filename, $contents),
-        ], $result);
+        $this->adapter->write($filename, $contents, new Config);
 
         $this->assertEquals($contents, $this->getResourceContent($filename));
     }
@@ -311,11 +308,10 @@ class SharefileAdapterFunctionalTest extends TestCase
     public function itCanCopyFiles(string $path, string $newpath)
     {
         $this->createResourceFile($path, 'foo');
-        $this->createResourceDir(UTIL::dirname($newpath));
+        $this->createResourceDir(Util::dirname($newpath));
 
-        $result = $this->adapter->copy($path, $newpath);
+        $this->adapter->copy($path, $newpath);
 
-        $this->assertTrue($result);
         $this->assertNotFalse($this->hasResource($path));
         $this->assertNotFalse($this->hasResource($newpath));
         $this->assertEquals($this->getResourceContent($path), $this->getResourceContent($newpath));
@@ -334,9 +330,8 @@ class SharefileAdapterFunctionalTest extends TestCase
     {
         $this->createResourceFile($filename, 'foo');
 
-        $result = $this->adapter->delete($filename);
+        $this->adapter->delete($filename);
 
-        $this->assertTrue($result);
         $this->assertFalse($this->hasResource($filename));
     }
 
@@ -357,8 +352,7 @@ class SharefileAdapterFunctionalTest extends TestCase
         $this->assertTrue($this->hasResource($path));
         $this->assertArraySubset(['type' => 'dir', 'path' => $path], $result);
 
-        $result = $this->adapter->deleteDir($path);
-        $this->assertTrue($result);
+        $this->adapter->deleteDirectory($path);
         $this->assertFalse($this->hasResource($path));
     }
 
@@ -418,8 +412,9 @@ class SharefileAdapterFunctionalTest extends TestCase
      */
     public function itCanFail()
     {
-        $this->assertFalse($this->adapter->has('/Foo'));
-        $this->assertFalse($this->adapter->read('/Foo'));
+        $this->expectException(UnableToReadFile::class);
+        $this->adapter->read('/Foo');
+
         $this->assertFalse($this->adapter->listContents('/Foo'));
         $this->assertFalse($this->adapter->getMetadata('/Foo'));
         $this->assertFalse($this->adapter->getSize('/Foo'));

@@ -8,7 +8,7 @@ use Sabre\DAV\Exception;
 use Sabre\HTTP\HttpException;
 use Kapersoft\ShareFile\Client;
 use Sabre\DAV\Client as WebDAVClient;
-use Kapersoft\FlysystemSharefile\sharefileAdapter;
+use Kapersoft\FlysystemSharefile\SharefileAdapter;
 use PHPUnit\Framework\TestCase as PHPUnit_Framework_Testcase;
 
 /**
@@ -52,7 +52,7 @@ abstract class TestCase extends PHPUnit_Framework_Testcase
     /**
      * Check environment variables and setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         if (! $this->checkEnvironmentVariables()) {
             $this->markTestSkipped('No ShareFile credentials are found. '.
@@ -70,7 +70,7 @@ abstract class TestCase extends PHPUnit_Framework_Testcase
     /**
      * Tear down tests.
      */
-    public function tearDown()
+    public function tearDown(): void
     {
         unset($this->adapter);
         $this->clearResources();
@@ -220,6 +220,7 @@ abstract class TestCase extends PHPUnit_Framework_Testcase
         $this->createResourceDir(dirname($path));
 
         $location = $this->getResourceLocation($path);
+
 
         $this->webdavClient->request('PUT', $location, $contents);
     }

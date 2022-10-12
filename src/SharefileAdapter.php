@@ -94,6 +94,17 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function read(string $path): string
     {
+        return $this->readWithMeta($path)['contents'] ?? '';
+    }
+
+    /**
+     * Reads file and maps info to array.
+     *
+     * @param $path
+     * @return array
+     */
+    public function readWithMeta($path)
+    {
         try {
             if (! $item = $this->getItemByPath($path)) {
                 throw new Exception('Item could not be found.');
@@ -105,7 +116,7 @@ class SharefileAdapter implements FilesystemAdapter
 
             $contents = $this->client->getItemContents($item['Id']);
 
-            return $this->mapItemInfo($item, Util::dirname($path), $contents)['contents'] ?? '';
+            return $this->mapItemInfo($item, Util::dirname($path), $contents);
         } catch (Throwable $exception) {
             throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
         }
@@ -116,12 +127,23 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function readStream($path)
     {
+        return $this->readStreamWithMeta($path)['stream'];
+    }
+
+    /**
+     * Reads stream and maps info to array.
+     *
+     * @param $path
+     * @return array
+     */
+    public function readStreamWithMeta($path)
+    {
         if (! $item = $this->getItemByPath($path)) {
-            return false;
+            throw new Exception('Item could not be found.');
         }
 
         if (! $this->checkAccessControl($item, self::CAN_DOWNLOAD)) {
-            return false;
+            throw new Exception('Access forbidden.');
         }
 
         $url = $this->client->getItemDownloadUrl($item['Id']);
@@ -130,6 +152,7 @@ class SharefileAdapter implements FilesystemAdapter
 
         return $this->mapItemInfo($item, Util::dirname($path), null, $stream);
     }
+
 
     /**
      * {@inheritdoc}

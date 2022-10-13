@@ -12,8 +12,9 @@ use League\Flysystem\UnableToCopyFile;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\UnableToWriteFile;
-use League\Flysystem\FilesystemException;
+use League\Flysystem\UnableToDeleteFile;
 use League\Flysystem\UnableToDeleteDirectory;
+use League\Flysystem\UnableToCreateDirectory;
 use League\Flysystem\UnableToRetrieveMetadata;
 
 /**
@@ -94,7 +95,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function read(string $path): string
     {
-        return $this->readWithMeta($path)['contents'] ?? '';
+        try {
+            return $this->readWithMeta($path)['contents'];
+        } catch (Throwable $exception) {
+            throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
+        }
     }
 
     /**
@@ -105,21 +110,17 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function readWithMeta($path)
     {
-        try {
-            if (! $item = $this->getItemByPath($path)) {
-                throw new Exception('Item could not be found.');
-            }
-
-            if (! $this->checkAccessControl($item, self::CAN_DOWNLOAD)) {
-                throw new Exception('Access forbidden.');
-            }
-
-            $contents = $this->client->getItemContents($item['Id']);
-
-            return $this->mapItemInfo($item, Util::dirname($path), $contents);
-        } catch (Throwable $exception) {
-            throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
+        if (! $item = $this->getItemByPath($path)) {
+            throw UnableToReadFile::fromLocation($path, 'Item could not be found.');
         }
+
+        if (! $this->checkAccessControl($item, self::CAN_DOWNLOAD)) {
+            throw new Exception('Access forbidden.');
+        }
+
+        $contents = $this->client->getItemContents($item['Id']);
+
+        return $this->mapItemInfo($item, Util::dirname($path), $contents);
     }
 
     /**
@@ -285,7 +286,7 @@ class SharefileAdapter implements FilesystemAdapter
             }
 
             if (! $this->checkAccessControl($targetFolderItem, self::CAN_UPLOAD)) {
-                throw new Exception("The file could not be copied because the user does not have access to the target folder, $destination.");
+                throw new Exception("You do not have permission to copy to this directory.");
             }
 
             if (! $item = $this->getItemByPath($source)) {
@@ -331,11 +332,9 @@ class SharefileAdapter implements FilesystemAdapter
     public function createDirectory(string $path, Config $config): void
     {
         try {
-            if (! $this->createDir($path)) {
-                throw new Exception('The directory could not be created.');
-            }
+            $this->createDir($path);
         } catch (Throwable $exception) {
-            throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
+            throw UnableToCreateDirectory::atLocation($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -390,7 +389,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function delete($path): void
     {
-        $this->deleteItem($path);
+        try {
+            $this->deleteItem($path);
+        } catch (Throwable $exception) {
+            throw UnableToDeleteFile::atLocation($path, $exception->getMessage());
+        }
     }
 
     /**
@@ -398,7 +401,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function deleteDirectory($path): void
     {
-        $this->deleteItem($path);
+        try {
+            $this->deleteItem($path);
+        } catch (Throwable $exception) {
+            throw UnableToDeleteDirectory::atLocation($path, $exception->getMessage());
+        }
     }
 
     /**
@@ -410,11 +417,11 @@ class SharefileAdapter implements FilesystemAdapter
         $folder = basename($dirname);
 
         if (! $parentFolderItem = $this->getItemByPath($parentFolder)) {
-            return false;
+            throw new Exception("Could not locate parent directory at $parentFolder.");
         }
 
         if (! $this->checkAccessControl($parentFolderItem, self::CAN_ADD_FOLDER)) {
-            return false;
+            throw new Exception("You do not have permission to create this directory.");
         }
 
         $this->client->createFolder($parentFolderItem['Id'], $folder, $folder, true);
@@ -473,11 +480,11 @@ class SharefileAdapter implements FilesystemAdapter
     protected function uploadFile(string $path, $contents, bool $overwrite = false)
     {
         if (! $parentFolderItem = $this->getItemByPath(Util::dirname($path))) {
-            return false;
+            throw new Exception("Unable to locate parent directory at $path.");
         }
 
         if (! $this->checkAccessControl($parentFolderItem, self::CAN_UPLOAD)) {
-            return false;
+            throw new Exception("You do not have permission to upload to parent directory at $path.");
         }
 
         if (is_string($contents)) {
@@ -498,7 +505,7 @@ class SharefileAdapter implements FilesystemAdapter
             return $metadata;
         }
 
-        return false;
+        throw new Exception('Unable to write file.');
     }
 
     /**

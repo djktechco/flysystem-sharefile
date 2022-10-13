@@ -5,13 +5,20 @@ namespace Kapersoft\FlysystemSharefile\Tests;
 use Faker\Factory;
 use Faker\Generator;
 use Prophecy\Argument;
-use League\Flysystem\Util;
 use League\Flysystem\Config;
-use GuzzleHttp\Psr7\Response;
 use org\bovigo\vfs\vfsStream;
+use GuzzleHttp\Psr7\Response;
 use Kapersoft\ShareFile\Client;
 use PHPUnit\Framework\TestCase;
-use Kapersoft\Sharefile\Exceptions\BadRequest;
+use Prophecy\PhpUnit\ProphecyTrait;
+use Kapersoft\FlysystemSharefile\Util;
+use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\UnableToReadFile;
+use League\Flysystem\UnableToWriteFile;
+use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\UnableToCreateDirectory;
+use League\Flysystem\UnableToDeleteDirectory;
+use Kapersoft\ShareFile\Exceptions\BadRequest;
 use Kapersoft\FlysystemSharefile\SharefileAdapter;
 
 /**
@@ -24,6 +31,9 @@ use Kapersoft\FlysystemSharefile\SharefileAdapter;
  */
 class SharefileAdapterTest extends TestCase
 {
+
+    use ProphecyTrait;
+
     /**
      * ShareFile client.
      *
@@ -55,13 +65,13 @@ class SharefileAdapterTest extends TestCase
     /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         $this->vfsRoot = vfsStream::setup('home');
 
         $this->client = $this->prophesize(Client::class);
 
-        $this->prefix = '/prefix';
+        $this->prefix = '/phpunit';
 
         $this->adapter = new SharefileAdapter($this->client->reveal(), $this->prefix);
     }
@@ -150,7 +160,7 @@ class SharefileAdapterTest extends TestCase
             'contents' => $contents,
          ]);
         $result = $this->adapter->read($filename);
-        $this->assertsame($expectedResult, $result);
+        $this->assertsame($expectedResult['contents'], $result);
     }
 
     /**
@@ -183,12 +193,8 @@ class SharefileAdapterTest extends TestCase
 
         $result = $this->adapter->readStream($filename);
 
-        $this->assertInternalType('resource', $result['stream']);
-        $this->assertSame($contents, stream_get_contents($result['stream']));
-
-        $result['stream'] = false;
-        $expectedResult = $this->calculateExpectedMetadata($filename);
-        $this->assertsame($expectedResult, $result);
+        $this->assertIsResource($result);
+        $this->assertSame($contents, stream_get_contents($result));
     }
 
     /**
@@ -257,7 +263,7 @@ class SharefileAdapterTest extends TestCase
      *
      * @dataProvider  updateProvider
      */
-    public function itCanWritePutAndUpdate(string $method, string $filename)
+    public function itCanWrite(string $method, string $filename)
     {
         $filenamePrefix = $this->applyPathPrefix($filename);
         $dirname = Util::dirname($filenamePrefix);
@@ -285,7 +291,7 @@ class SharefileAdapterTest extends TestCase
             'contents' => $contents,
         ]);
 
-        $this->assertSame($expectedResult, $result);
+        $this->assertSame(null, $result);
     }
 
     /**
@@ -297,7 +303,7 @@ class SharefileAdapterTest extends TestCase
      *
      * @dataProvider  filenameProvider
      */
-    public function itCanWritestreamUpdatestream(string $filename)
+    public function itCanWritestream(string $filename)
     {
         $filenamePrefix = $this->applyPathPrefix($filename);
         $dirname = Util::dirname($filenamePrefix);
@@ -323,10 +329,7 @@ class SharefileAdapterTest extends TestCase
         fseek($resource, 0);
         fwrite($resource, $contents);
 
-        $expectedResult = $this->calculateExpectedMetadata($filename);
-
-        $this->assertSame($expectedResult, $this->adapter->writeStream($filename, $resource, new Config()));
-        $this->assertSame($expectedResult, $this->adapter->updateStream($filename, $resource, new Config()));
+        $this->assertNull($this->adapter->writeStream($filename, $resource, new Config([])));
     }
 
     /**
@@ -456,7 +459,7 @@ class SharefileAdapterTest extends TestCase
 
         $result = $this->adapter->copy($filename, $newPath);
 
-        $this->assertTrue($result);
+        $this->assertNull($result);
     }
 
     /**
@@ -496,9 +499,7 @@ class SharefileAdapterTest extends TestCase
             $this->mockSharefileItem($newPath)
         );
 
-        $result = $this->adapter->copy($filename, $newPath);
-
-        $this->assertTrue($result);
+        $this->assertNull($this->adapter->copy($filename, $newPath));
     }
 
     /**
@@ -548,8 +549,8 @@ class SharefileAdapterTest extends TestCase
 
         $this->client->deleteItem(2)->willReturn('');
 
-        $this->assertTrue($this->adapter->delete($filename));
-        $this->assertTrue($this->adapter->deleteDir($dirname));
+        $this->assertNull($this->adapter->delete($filename));
+        $this->assertNull($this->adapter->deleteDirectory($dirname));
     }
 
     /**
@@ -596,18 +597,20 @@ class SharefileAdapterTest extends TestCase
      *
      * @dataProvider  filenameProvider
      */
-    public function itReturnsFalseWhenParentFolderIsNotFound(string $filename)
+    public function itThrowsExceptionWhenParentFolderIsNotFound(string $filename)
     {
         $pathParentPrefix = $this->applyPathPrefix(Util::dirname($filename));
 
         $this->client->getItemByPath($pathParentPrefix)->willThrow(new BadRequest(new Response(404)));
 
-        $this->assertFalse($this->adapter->write($filename, Argument::any(), new Config()));
-        $this->assertFalse($this->adapter->update($filename, Argument::any(), new Config()));
-        $this->assertFalse($this->adapter->rename(Argument::any(), $filename));
-        $this->assertFalse($this->adapter->copy(Argument::any(), $filename));
-        $this->assertFalse($this->adapter->createDir($filename, new Config()));
-        $this->assertFalse($this->adapter->put($filename, Argument::any()));
+        $this->expectException(UnableToWriteFile::class);
+        $this->adapter->write($filename, Argument::any(), new Config());
+
+        $this->expectException(UnableToCopyFile::class);
+        $this->adapter->copy(Argument::any(), $filename);
+
+        $this->expectException(UnableToCreateDirectory::class);
+        $this->adapter->createDirectory($filename, new Config());
     }
 
     /**
@@ -619,7 +622,7 @@ class SharefileAdapterTest extends TestCase
      *
      * @dataProvider  filenameProvider
      */
-    public function itReturnsFalseWhenParentFolderHasNoRights(string $filename)
+    public function itThrowsExceptionWhenParentFolderHasNoRights(string $filename)
     {
         $pathParentPrefix = $this->applyPathPrefix(Util::dirname($filename));
 
@@ -640,12 +643,18 @@ class SharefileAdapterTest extends TestCase
             ],
         ]);
 
-        $this->assertFalse($this->adapter->write($filename, Argument::any(), new Config()));
-        $this->assertFalse($this->adapter->update($filename, Argument::any(), new Config()));
-        $this->assertFalse($this->adapter->rename(Argument::any(), $filename));
-        $this->assertFalse($this->adapter->copy(Argument::any(), $filename));
-        $this->assertFalse($this->adapter->createDir($filename, new Config()));
-        $this->assertFalse($this->adapter->put($filename, Argument::any()));
+        $this->expectException(UnableToWriteFile::class);
+        $this->expectExceptionMessage($filename);
+        $this->adapter->write($filename, Argument::any(), new Config());
+
+        $this->expectException(UnableToCopyFile::class);
+        $this->expectExceptionMessage("Unable to copy file from * to $filename");
+        $this->adapter->copy(Argument::any(), $filename);
+
+        $this->expectException(UnableToCreateDirectory::class);
+        $this->expectExceptionMessage("Unable to create a directory at $filename. You do not have permission to create this directory.");
+        $this->adapter->createDirectory($filename, new Config());
+
     }
 
     /**
@@ -666,12 +675,17 @@ class SharefileAdapterTest extends TestCase
             'Id' => 1,
         ]);
 
-        $this->assertFalse($this->adapter->write($filename, Argument::any(), new Config()));
-        $this->assertFalse($this->adapter->update($filename, Argument::any(), new Config()));
-        $this->assertFalse($this->adapter->rename(Argument::any(), $filename));
-        $this->assertFalse($this->adapter->copy(Argument::any(), $filename));
-        $this->assertFalse($this->adapter->createDir($filename, new Config()));
-        $this->assertFalse($this->adapter->put($filename, Argument::any()));
+        $this->expectException(UnableToWriteFile::class);
+        $this->expectExceptionMessage($filename);
+        $this->adapter->write($filename, Argument::any(), new Config());
+
+        $this->expectException(UnableToCopyFile::class);
+        $this->expectExceptionMessage("Unable to copy file from * to $filename");
+        $this->adapter->copy(Argument::any(), $filename);
+
+        $this->expectException(UnableToCreateDirectory::class);
+        $this->expectExceptionMessage("Unable to create a directory at $filename. You do not have permission to create this directory.");
+        $this->adapter->createDirectory($filename, new Config());
     }
 
     /**
@@ -683,7 +697,7 @@ class SharefileAdapterTest extends TestCase
      *
      * @dataProvider  filenameProvider
      */
-    public function itReturnsFalseWhenItemIsNotFound(string $filename)
+    public function itThrowsExceptionWhenItemIsNotFound(string $filename)
     {
         $filenamePrefix = $this->applyPathPrefix($filename);
 
@@ -706,13 +720,19 @@ class SharefileAdapterTest extends TestCase
 
         $this->client->getItemByPath($filenamePrefix)->willThrow(new BadRequest(new Response(404)));
 
-        $this->assertFalse($this->adapter->read($filename, Argument::any()));
-        $this->assertFalse($this->adapter->listContents($filename, Argument::any()));
-        $this->assertFalse($this->adapter->rename($filename, Argument::any()));
-        $this->assertFalse($this->adapter->copy($filename, Argument::any()));
-        $this->assertFalse($this->adapter->delete($filename));
-        $this->assertFalse($this->adapter->deleteDir($filename));
-        $this->assertFalse($this->adapter->readAndDelete($filename));
+        $this->expectException(UnableToReadFile::class);
+        $this->adapter->read($filename, Argument::any());
+
+        $this->assertEmpty($this->adapter->listContents($filename, Argument::any()));
+
+        $this->expectException(UnableToCopyFile::class);
+        $this->adapter->copy($filename, Argument::any());
+
+        $this->expectException(UnableToDeleteFile::class);
+        $this->adapter->delete($filename);
+
+        $this->expectException(UnableToDeleteDirectory::class);
+        $this->adapter->deleteDirectory($filename);
     }
 
     /**
@@ -737,8 +757,10 @@ class SharefileAdapterTest extends TestCase
         $provider = [];
         foreach ($this->filenames() as $filename) {
             $provider[] = ['write', $filename];
-            $provider[] = ['update', $filename];
-            $provider[] = ['put', $filename];
+
+            // removed from FlysystemAdapter interface
+            // $provider[] = ['update', $filename];
+            // $provider[] = ['put', $filename];
         }
 
         return $provider;

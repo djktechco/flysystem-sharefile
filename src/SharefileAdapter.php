@@ -13,6 +13,7 @@ use League\Flysystem\UnableToReadFile;
 use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\UnableToWriteFile;
 use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\UnableToDeleteDirectory;
 use League\Flysystem\UnableToCreateDirectory;
 use League\Flysystem\UnableToRetrieveMetadata;
@@ -164,7 +165,15 @@ class SharefileAdapter implements FilesystemAdapter
             return [];
         }
 
-        return $this->buildItemList($item, $directory, $recursive);
+        $directories = [];
+
+        foreach ($this->buildItemList($item, $directory, $recursive) as $directory) {
+            $directoryAttributes = new DirectoryAttributes($directory['path'],null,$directory['timestamp']);
+
+            array_push($directories, $directoryAttributes);
+        }
+
+        return $directories;
     }
 
 

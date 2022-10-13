@@ -353,9 +353,12 @@ class SharefileAdapter implements FilesystemAdapter
         }
     }
 
+    /**
+     * {@inheritdoc}
+     */
     public function mimeType(string $path): FileAttributes
     {
-        // TODO: Implement mimeType() method.
+        return $this->getFileAttributes($path);
     }
 
     /**
@@ -374,14 +377,20 @@ class SharefileAdapter implements FilesystemAdapter
         throw UnableToRetrieveMetadata::visibility(get_class($this) . ' does not support visibility. Path: ' . $path);
     }
 
+    /**
+     * {@inheritdoc}
+     */
     public function fileSize(string $path): FileAttributes
     {
-        // TODO: Implement fileSize() method.
+        return $this->getFileAttributes($path);
     }
 
+    /**
+     * {@inheritdoc}
+     */
     public function lastModified(string $path): FileAttributes
     {
-        // TODO: Implement lastModified() method.
+        return $this->getFileAttributes($path);
     }
 
     /**
@@ -750,5 +759,28 @@ class SharefileAdapter implements FilesystemAdapter
     public function has($path)
     {
         return $this->getMetadata($path);
+    }
+
+    /**
+     * Maps file info to FileAttribute class.
+     *
+     * @param string $path
+     * @return FileAttributes
+     */
+    protected function getFileAttributes(string $path): FileAttributes
+    {
+        try {
+            $metadata = $this->readWithMeta($path);
+
+            return new FileAttributes(
+                $path,
+                $metadata['size'],
+                null,
+                $metadata['timestamp'],
+                $metadata['mimetype']
+            );
+        } catch (Throwable $exception) {
+            throw UnableToRetrieveMetadata::mimeType($path);
+        }
     }
 }

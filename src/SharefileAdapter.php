@@ -165,15 +165,26 @@ class SharefileAdapter implements FilesystemAdapter
             return [];
         }
 
-        $directories = [];
+        $children = $this->buildItemList($item, $directory, $recursive);
 
-        foreach ($this->buildItemList($item, $directory, $recursive) as $directory) {
-            $directoryAttributes = new DirectoryAttributes($directory['path'],null,$directory['timestamp']);
+        return array_map(function($item) {
+            return $this->mapItemToStorageAttributes($item);
+        }, $children);
+    }
 
-            array_push($directories, $directoryAttributes);
+    /**
+     * Maps item to corresponding StorageAttribute class.
+     *
+     * @param $item
+     * @return DirectoryAttributes|FileAttributes
+     */
+    protected function  mapItemToStorageAttributes($item)
+    {
+        if ($item['type'] == 'file') {
+            return $this->getFileAttributes($item);
         }
 
-        return $directories;
+        return new DirectoryAttributes($item['path'],null, $item['timestamp']);
     }
 
 
@@ -367,7 +378,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function mimeType(string $path): FileAttributes
     {
-        return $this->getFileAttributes($path);
+        if (!$item = $this->getItemByPath($path)) {
+            throw new UnableToRetrieveMetadata('Item not found.');
+        }
+
+        return $this->getFileAttributes($this->mapItemInfo($item, $path, $item['contents']));
     }
 
     /**
@@ -391,7 +406,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function fileSize(string $path): FileAttributes
     {
-        return $this->getFileAttributes($path);
+        if (!$item = $this->getItemByPath($path)) {
+            throw new UnableToRetrieveMetadata('Item not found.');
+        }
+
+        return $this->getFileAttributes($this->mapItemInfo($item, $item['path'], $item['contents']));
     }
 
     /**
@@ -399,7 +418,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     public function lastModified(string $path): FileAttributes
     {
-        return $this->getFileAttributes($path);
+        if (!$item = $this->getItemByPath($path)) {
+            throw new UnableToRetrieveMetadata('Item not found.');
+        }
+
+        return $this->getFileAttributes($this->mapItemInfo($item, $item['path'], $item['contents']));
     }
 
     /**
@@ -668,7 +691,11 @@ class SharefileAdapter implements FilesystemAdapter
      */
     protected function isShareFileApiModelsFile(array $item):bool
     {
-        return $item['odata.type'] == 'ShareFile.Api.Models.File';
+        try {
+            return $item['odata.type'] == 'ShareFile.Api.Models.File';
+        } catch (Throwable $exception) {
+            dd(debug_backtrace()[1]['function']);
+        }
     }
 
     /**
@@ -689,10 +716,12 @@ class SharefileAdapter implements FilesystemAdapter
 
         try {
             $item = $this->client->getItemByPath($path);
+
             if ($this->isShareFileApiModelsFolder($item) || $this->isShareFileApiModelsFile($item)) {
                 return $item;
             }
         } catch (exception $e) {
+
             return false;
         }
 
@@ -776,20 +805,14 @@ class SharefileAdapter implements FilesystemAdapter
      * @param string $path
      * @return FileAttributes
      */
-    protected function getFileAttributes(string $path): FileAttributes
+    protected function getFileAttributes(array $item): FileAttributes
     {
-        try {
-            $metadata = $this->readWithMeta($path);
-
-            return new FileAttributes(
-                $path,
-                $metadata['size'],
-                null,
-                $metadata['timestamp'],
-                $metadata['mimetype']
-            );
-        } catch (Throwable $exception) {
-            throw UnableToRetrieveMetadata::mimeType($path);
-        }
+        return new FileAttributes(
+            $item['path'],
+            $item['size'],
+            null,
+            $item['timestamp'],
+            $item['mimetype']
+        );
     }
 }

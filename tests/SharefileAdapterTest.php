@@ -11,11 +11,13 @@ use GuzzleHttp\Psr7\Response;
 use Kapersoft\ShareFile\Client;
 use PHPUnit\Framework\TestCase;
 use Prophecy\PhpUnit\ProphecyTrait;
+use League\Flysystem\FileAttributes;
 use Kapersoft\FlysystemSharefile\Util;
 use League\Flysystem\UnableToCopyFile;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToWriteFile;
 use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\UnableToCreateDirectory;
 use League\Flysystem\UnableToDeleteDirectory;
 use Kapersoft\ShareFile\Exceptions\BadRequest;
@@ -243,14 +245,18 @@ class SharefileAdapterTest extends TestCase
         $result = $this->adapter->listContents($directory, true);
 
         $expectedResult = [
-            $this->calculateExpectedMetadata($directory.'/folder', [
-                'mimetype' => 'inode/directory',
-                'type' => 'dir',
-            ]),
-            $this->calculateExpectedMetadata($directory.'/folder/file.txt'),
+            $this->getExpectedStorageAttributes(
+                $this->calculateExpectedMetadata($directory.'/folder', [
+                    'mimetype' => 'inode/directory',
+                    'type' => 'dir',
+                ])
+            ),
+            $this->getExpectedStorageAttributes(
+                $this->calculateExpectedMetadata($directory.'/folder/file.txt')
+            ),
         ];
 
-        $this->assertsame($expectedResult, $result);
+        $this->assertEquals($expectedResult, $result);
     }
 
     /**
@@ -850,6 +856,27 @@ class SharefileAdapterTest extends TestCase
             ],
             $extra
         );
+    }
+
+    /**
+     * Map metadata to appropriate StorageAttribute class.
+     *
+     * @param $itemMetadata
+     * @return DirectoryAttributes|FileAttributes
+     */
+    protected function getExpectedStorageAttributes($itemMetadata)
+    {
+        if ($itemMetadata['type'] == 'file') {
+            return new FileAttributes(
+                $itemMetadata['path'],
+                $itemMetadata['size'],
+                null,
+                $itemMetadata['timestamp'],
+                $itemMetadata['mimetype']
+            );
+        }
+
+        return new DirectoryAttributes($itemMetadata['path'],null, $itemMetadata['timestamp']);
     }
 
     /**

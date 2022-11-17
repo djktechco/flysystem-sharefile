@@ -641,11 +641,11 @@ class SharefileAdapter implements FilesystemAdapter
 
         if ($recursive) {
             foreach ($children as $child) {
-                $path = $path.'/'.$child['FileName'];
+                $full_path = $path.'/'.$child['FileName'];
 
                 $itemList = array_merge(
                     $itemList,
-                    $this->buildItemList($child, $path, true)
+                    $this->buildItemList($child, $full_path, true)
                 );
             }
         }
